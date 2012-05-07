@@ -1,7 +1,7 @@
 JBehave Eclipse plugin
 =======================
 
-**In progree** see [presentation](http://arnauld.github.com/jbehave-eclipse-plugin/)
+**In progress** see [presentation](http://arnauld.github.com/jbehave-eclipse-plugin/)
 
 Misc:
 
@@ -35,7 +35,7 @@ Previous (for posterity)
 Installation
 ------------
 
-Simply drop the jar in your eclipse `plugins/` directory and restart your ide.
+Simply drop the jar in your eclipse `dropins/` directory and restart your ide.
 
 
 RELEASE NOTES
