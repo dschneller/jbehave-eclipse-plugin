@@ -8,6 +8,10 @@ import java.util.regex.Pattern;
 
 public class Strings {
     
+    public static String[] s(String...args) {
+        return args;
+    }
+    
     public static String getSubLineUntilOffset(String text, int offset) {
         String analyzedPart = text.substring(0, Math.min(offset, text.length()));
         String[] lines = analyzedPart.split("[\\n\\r]+");
@@ -42,6 +46,18 @@ public class Strings {
         if(slen<plen)
             return false;
         return sameStarts(sequence, prefix);
+    }
+    
+    public static String removeLeftSpaces(String string) {
+        if(string==null)
+            return null;
+        int len = string.length();
+        int st = 0;
+
+        while ((st < len) && (string.charAt(st) == ' ')) {
+            st++;
+        }
+        return (st > 0) ? string.substring(st) : string;
     }
     
     public static String removeTrailingNewlines(String string) {

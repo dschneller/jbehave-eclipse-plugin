@@ -11,6 +11,7 @@ import java.util.zip.Adler32;
 
 import org.apache.commons.lang.StringUtils;
 import org.eclipse.core.resources.IProject;
+import org.eclipse.core.runtime.preferences.IEclipsePreferences.IPreferenceChangeListener;
 import org.eclipse.core.runtime.preferences.IScopeContext;
 import org.osgi.service.prefs.BackingStoreException;
 import org.technbolts.eclipse.preferences.PreferencesHelper;
@@ -44,6 +45,10 @@ public class ClassScannerPreferences {
 
     public ClassScannerPreferences(final IProject project) {
         helper = PreferencesHelper.getHelper(QUALIFIER, project);
+    }
+    
+    public void addListener(IPreferenceChangeListener changeListener) {
+        helper.addListener(changeListener);
     }
     
     public StringMatcher getPackageRootMatcher() {
@@ -104,6 +109,7 @@ public class ClassScannerPreferences {
     }
 
     public void store() throws BackingStoreException {
+        helper.removeAllAtLowestScope();
         boolean[] modes = { true, false };
         
         for(ApplyOn applyOn : ApplyOn.values()) {
@@ -199,5 +205,5 @@ public class ClassScannerPreferences {
             return Bytes.longToBytes(adler32.getValue());
         }
     }
-    
+
 }

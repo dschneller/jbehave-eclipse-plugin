@@ -1,5 +1,6 @@
 package org.technbolts.jbehave.eclipse.editors.story;
 
+import java.lang.reflect.Field;
 import java.util.List;
 
 import org.eclipse.jface.text.IDocument;
@@ -13,7 +14,10 @@ import org.eclipse.jface.text.source.IAnnotationHover;
 import org.eclipse.jface.text.source.ISourceViewer;
 import org.eclipse.jface.text.source.SourceViewerConfiguration;
 import org.technbolts.eclipse.util.TextAttributeProvider;
+import org.technbolts.jbehave.eclipse.Activator;
+import org.technbolts.jbehave.eclipse.JBehaveProject;
 import org.technbolts.jbehave.eclipse.editors.story.completion.StepContentAssistant;
+import org.technbolts.jbehave.eclipse.editors.story.scanner.AllInOneScanner;
 import org.technbolts.jbehave.eclipse.editors.story.scanner.ExampleTableScanner;
 import org.technbolts.jbehave.eclipse.editors.story.scanner.MiscScanner;
 import org.technbolts.jbehave.eclipse.editors.story.scanner.NarrativeScanner;
@@ -21,7 +25,6 @@ import org.technbolts.jbehave.eclipse.editors.story.scanner.ScenarioScanner;
 import org.technbolts.jbehave.eclipse.editors.story.scanner.SingleTokenScanner;
 import org.technbolts.jbehave.eclipse.editors.story.scanner.StepScannerStyled;
 import org.technbolts.jbehave.eclipse.textstyle.TextStyle;
-import org.technbolts.jbehave.eclipse.util.StepLocator;
 import org.technbolts.jbehave.support.JBPartition;
 
 public class StoryConfiguration extends SourceViewerConfiguration {
@@ -36,12 +39,13 @@ public class StoryConfiguration extends SourceViewerConfiguration {
     private TextAttributeProvider textAttributeProvider;
     private StoryEditor storyEditor;
     private PresentationReconciler reconciler;
+    private Object reconcilerInternalListener;
 
     public StoryConfiguration(StoryEditor storyEditor, TextAttributeProvider textAttributeProvider) {
         this.storyEditor = storyEditor;
         this.textAttributeProvider = textAttributeProvider;
     }
-
+    
     /* (non-Javadoc)
      * @see org.eclipse.jface.text.source.SourceViewerConfiguration#getConfiguredContentTypes(org.eclipse.jface.text.source.ISourceViewer)
      */
@@ -75,14 +79,13 @@ public class StoryConfiguration extends SourceViewerConfiguration {
 
     protected ITokenScanner getStepScanner() {
         if (stepScanner == null) {
-            stepScanner = new StepScannerStyled(new StepLocator.Provider() {
-                @Override
-                public StepLocator getStepLocator() {
-                    return StepLocator.getStepLocator(storyEditor.getProject());
-                }
-            }, textAttributeProvider);
+            stepScanner = new StepScannerStyled(getJBehaveProject(), textAttributeProvider);
         }
         return stepScanner;
+    }
+
+    protected JBehaveProject getJBehaveProject() {
+        return storyEditor.getJBehaveProject();
     }
     
     protected ITokenScanner getCommentScanner() {
@@ -94,28 +97,28 @@ public class StoryConfiguration extends SourceViewerConfiguration {
     
     protected ITokenScanner getScenarioScanner() {
         if (scenarioScanner == null) {
-            scenarioScanner = new ScenarioScanner(textAttributeProvider);
+            scenarioScanner = new ScenarioScanner(getJBehaveProject(), textAttributeProvider);
         }
         return scenarioScanner;
     }
     
     protected ITokenScanner getNarrativeScanner() {
         if (narrativeScanner == null) {
-            narrativeScanner = new NarrativeScanner(textAttributeProvider);
+            narrativeScanner = new NarrativeScanner(getJBehaveProject(), textAttributeProvider);
         }
         return narrativeScanner;
     }
     
     protected ITokenScanner getMiscScanner() {
         if (miscScanner == null) {
-            miscScanner = new MiscScanner(textAttributeProvider);
+            miscScanner = new MiscScanner(getJBehaveProject(), textAttributeProvider);
         }
         return miscScanner;
     }
     
     protected ITokenScanner getExampleTableScanner() {
         if (exampleTableScanner == null) {
-            exampleTableScanner = new ExampleTableScanner(textAttributeProvider);
+            exampleTableScanner = new ExampleTableScanner(getJBehaveProject(), textAttributeProvider);
         }
         return exampleTableScanner;
     }
@@ -129,35 +132,52 @@ public class StoryConfiguration extends SourceViewerConfiguration {
      */
     @Override
     public IPresentationReconciler getPresentationReconciler(ISourceViewer sourceViewer) {
-        reconciler = new PresentationReconciler();
-
-        DefaultDamagerRepairer dr = new DefaultDamagerRepairer(getDefaultScanner());
-        reconciler.setDamager(dr, IDocument.DEFAULT_CONTENT_TYPE);
-        reconciler.setRepairer(dr, IDocument.DEFAULT_CONTENT_TYPE);
-
-        dr = new DefaultDamagerRepairer(getStepScanner());
-        reconciler.setDamager(dr, JBPartition.Step.name());
-        reconciler.setRepairer(dr, JBPartition.Step.name());
-
-        dr = new DefaultDamagerRepairer(getCommentScanner());
-        reconciler.setDamager(dr, JBPartition.Comment.name());
-        reconciler.setRepairer(dr, JBPartition.Comment.name());
-
-        dr = new DefaultDamagerRepairer(getScenarioScanner());
-        reconciler.setDamager(dr, JBPartition.Scenario.name());
-        reconciler.setRepairer(dr, JBPartition.Scenario.name());
+        reconciler = new PresentationReconciler() {
+        };
         
-        dr = new DefaultDamagerRepairer(getNarrativeScanner());
-        reconciler.setDamager(dr, JBPartition.Narrative.name());
-        reconciler.setRepairer(dr, JBPartition.Narrative.name());
-        
-        dr = new DefaultDamagerRepairer(getExampleTableScanner());
-        reconciler.setDamager(dr, JBPartition.ExampleTable.name());
-        reconciler.setRepairer(dr, JBPartition.ExampleTable.name());
-        
-        dr = new DefaultDamagerRepairer(getMiscScanner());
-        reconciler.setDamager(dr, JBPartition.Misc.name());
-        reconciler.setRepairer(dr, JBPartition.Misc.name());
+        try {
+            Field declaredField = PresentationReconciler.class.getDeclaredField("fInternalListener");
+            declaredField.setAccessible(true);
+            reconcilerInternalListener = declaredField.get(reconciler);
+        } catch (Exception e) {
+            Activator.logError("Failed to retrieve internal listener", e);
+        }
+
+        DefaultDamagerRepairer dr;
+        if(AllInOneScanner.allInOne) {
+            dr = new DefaultDamagerRepairer(new AllInOneScanner(getJBehaveProject(), textAttributeProvider));
+            reconciler.setDamager(dr, IDocument.DEFAULT_CONTENT_TYPE);
+            reconciler.setRepairer(dr, IDocument.DEFAULT_CONTENT_TYPE);
+        }
+        else {
+            dr = new DefaultDamagerRepairer(getDefaultScanner());
+            reconciler.setDamager(dr, IDocument.DEFAULT_CONTENT_TYPE);
+            reconciler.setRepairer(dr, IDocument.DEFAULT_CONTENT_TYPE);
+    
+            dr = new DefaultDamagerRepairer(getStepScanner());
+            reconciler.setDamager(dr, JBPartition.Step.name());
+            reconciler.setRepairer(dr, JBPartition.Step.name());
+    
+            dr = new DefaultDamagerRepairer(getCommentScanner());
+            reconciler.setDamager(dr, JBPartition.Comment.name());
+            reconciler.setRepairer(dr, JBPartition.Comment.name());
+    
+            dr = new DefaultDamagerRepairer(getScenarioScanner());
+            reconciler.setDamager(dr, JBPartition.Scenario.name());
+            reconciler.setRepairer(dr, JBPartition.Scenario.name());
+            
+            dr = new DefaultDamagerRepairer(getNarrativeScanner());
+            reconciler.setDamager(dr, JBPartition.Narrative.name());
+            reconciler.setRepairer(dr, JBPartition.Narrative.name());
+            
+            dr = new DefaultDamagerRepairer(getExampleTableScanner());
+            reconciler.setDamager(dr, JBPartition.ExampleTable.name());
+            reconciler.setRepairer(dr, JBPartition.ExampleTable.name());
+            
+            dr = new DefaultDamagerRepairer(getMiscScanner());
+            reconciler.setDamager(dr, JBPartition.Misc.name());
+            reconciler.setRepairer(dr, JBPartition.Misc.name());
+        }
         
         return reconciler;
     }
@@ -167,5 +187,8 @@ public class StoryConfiguration extends SourceViewerConfiguration {
         return new StoryAnnotationHover(storyEditor);
     }
     
-    
+    @SuppressWarnings("unchecked")
+    public <T> T getReconcilerInternalListener(Class<T> asType) {
+        return (T)reconcilerInternalListener;
+    }
 }

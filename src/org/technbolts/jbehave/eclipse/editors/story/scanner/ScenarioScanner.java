@@ -2,6 +2,7 @@ package org.technbolts.jbehave.eclipse.editors.story.scanner;
 
 import org.eclipse.jface.text.rules.IToken;
 import org.technbolts.eclipse.util.TextAttributeProvider;
+import org.technbolts.jbehave.eclipse.JBehaveProject;
 import org.technbolts.jbehave.eclipse.textstyle.TextStyle;
 import org.technbolts.jbehave.parser.StoryPart;
 import org.technbolts.jbehave.support.JBKeyword;
@@ -10,8 +11,8 @@ public class ScenarioScanner extends AbstractStoryPartBasedScanner {
     
     private IToken keywordToken;
 
-    public ScenarioScanner(TextAttributeProvider textAttributeProvider) {
-        super(textAttributeProvider);
+    public ScenarioScanner(JBehaveProject jbehaveProject, TextAttributeProvider textAttributeProvider) {
+        super(jbehaveProject, textAttributeProvider);
         initialize();
     }
     
@@ -25,7 +26,7 @@ public class ScenarioScanner extends AbstractStoryPartBasedScanner {
     @Override
     protected boolean isPartAccepted(StoryPart part) {
         JBKeyword keyword = part.getPreferredKeyword();
-        if(keyword==JBKeyword.Scenario) {
+        if(keyword==JBKeyword.Scenario || keyword.isComment()) {
             return true;
         }
         return false;
@@ -34,16 +35,16 @@ public class ScenarioScanner extends AbstractStoryPartBasedScanner {
     @Override
     protected void emitPart(StoryPart part) {
         String content = part.getContent();
-        String kwString = JBKeyword.Scenario.asString();
+        String kwString = getLocalizedStepSupport().lScenario(false);
         int offset = part.getOffset();
         
         if(content.startsWith(kwString)) {
             emit(keywordToken, offset, kwString.length());
             offset += kwString.length();
-            emit(getDefaultToken(), offset, content.length()-kwString.length());
+            emitCommentAware(getDefaultToken(), offset, content.substring(kwString.length()));
         }
         else {
-            emit(getDefaultToken(), offset, content.length());
+            emitCommentAware(getDefaultToken(), offset, content);
         }
     }
 }

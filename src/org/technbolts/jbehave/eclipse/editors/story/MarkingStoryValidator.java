@@ -1,14 +1,14 @@
 package org.technbolts.jbehave.eclipse.editors.story;
 
 import static fj.data.List.iterableList;
+import static org.technbolts.util.Objects.o;
 
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 import org.eclipse.core.resources.IFile;
 import org.eclipse.core.resources.IMarker;
-import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
 import org.eclipse.core.resources.IWorkspace;
 import org.eclipse.core.resources.IWorkspaceRunnable;
@@ -21,6 +21,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.technbolts.eclipse.util.MarkData;
 import org.technbolts.jbehave.eclipse.Activator;
+import org.technbolts.jbehave.eclipse.JBehaveProject;
 import org.technbolts.jbehave.eclipse.PotentialStep;
 import org.technbolts.jbehave.eclipse.util.PotentialStepPrioTransformer;
 import org.technbolts.jbehave.eclipse.util.StepLocator;
@@ -45,11 +46,11 @@ public class MarkingStoryValidator {
 
     private IFile file;
     private IDocument document;
-    private IProject project;
+    private JBehaveProject project;
 
     private boolean applyMarkAsynchronously;
 
-    public MarkingStoryValidator(IProject project, IFile file, IDocument document) {
+    public MarkingStoryValidator(JBehaveProject project, IFile file, IDocument document) {
         super();
         this.project = project;
         this.file = file;
@@ -65,7 +66,7 @@ public class MarkingStoryValidator {
     }
 
     public void validate(Runnable afterApplyCallback) {
-        List<StoryPart> parts = StoryPartDocumentUtils.getStoryParts(document);
+        List<StoryPart> parts = new StoryPartDocumentUtils(project.getLocalizedStepSupport()).getStoryParts(document);
         analyzeParts(parts, afterApplyCallback);
     }
 
@@ -77,11 +78,14 @@ public class MarkingStoryValidator {
             }
         });
         
+        Activator.logInfo("Validating parts #" + parts.length());
+        
         ProcessGroup<?> group = Activator.getDefault().newProcessGroup();
         group.spawn(checkStepsAsRunnable(parts));
         group.spawn(checkNarrativeAsRunnable(parts));
 
         try {
+            Activator.logInfo("Awaiting termination of part validation");
             group.awaitTermination();
         } catch (InterruptedException e) {
             Activator.logError("MarkingStoryValidator:Error while checking steps for parts: " + parts, e);
@@ -220,35 +224,30 @@ public class MarkingStoryValidator {
     }
 
     private void checkSteps(final fj.data.List<Part> parts) throws JavaModelException {
-        fj.data.List<Part> steps = parts.filter(new F<Part,Boolean>() {
+        final fj.data.List<Part> steps = parts.filter(new F<Part,Boolean>() {
             public Boolean f(Part part) {
-                return JBKeyword.isStep(part.storyPart.getPreferredKeyword());
+                return JBKeyword.isStep(part.partType());
             };
         });
         
-        final Map<String, List<PotentialStep>> potentials = New.hashMap();
-        for (Part part : steps) {
-            List<PotentialStep> list = New.arrayList();
-            String stepSentence = part.extractStepSentenceAndRemoveTrailingNewlines();
-            log.debug("To analyse: >>" + Strings.escapeNL(stepSentence) + "<<");
-            potentials.put(stepSentence, list);
-        }
-
-        StepLocator locator = StepLocator.getStepLocator(project);
+        log.debug("Validating steps");
+        
+        StepLocator locator = project.getStepLocator();
         locator.traverseSteps(new Visitor<PotentialStep, Object>() {
             @Override
             public void visit(PotentialStep candidate) {
-                for (String searched : potentials.keySet()) {
-                    if (candidate.matches(searched)) {
-                        potentials.get(searched).add(candidate);
-                    }
+                log.debug("Evaluating candidate: <{}>", candidate);
+                for (Part part : steps) {
+                    part.evaluateCandidate(candidate);
                 }
             }
         });
+        
+        log.info("All candidates have been evaluated");
 
         for (Part part : steps) {
             String key = part.extractStepSentenceAndRemoveTrailingNewlines();
-            List<PotentialStep> candidates = potentials.get(key);
+            ConcurrentLinkedQueue<PotentialStep> candidates = part.getCandidates();
             int count = candidates.size();
             log.debug("#" + count + "result(s) found for >>" + Strings.escapeNL(key) + "<<");
             if (count == 0)
@@ -271,32 +270,67 @@ public class MarkingStoryValidator {
             }
         }
     }
-
+    
     class Part {
-        private List<MarkData> marks = New.arrayList();
-        private StoryPart storyPart;
+        private final ConcurrentLinkedQueue<MarkData> marks = New.concurrentLinkedQueue();
+        private final ConcurrentLinkedQueue<PotentialStep> candidates = New.concurrentLinkedQueue();
+        private final StoryPart storyPart;
 
         private Part(StoryPart storyPart) {
             super();
             this.storyPart = storyPart;
+            computeExtractStepSentenceAndRemoveTrailingNewlines();
+        }
+        
+        public void evaluateCandidate(PotentialStep candidate) {
+            String pattern = extractStepSentenceAndRemoveTrailingNewlines();
+            JBKeyword type = partType();
+            log.debug("Candidate evaluated against part {}", storyPart);
+            boolean patternMatch = candidate.matches(pattern);
+            boolean typeMatch = type.isSameAs(candidate.stepType);
+            if (patternMatch && typeMatch) {
+                log.debug("Candidate accepted");
+                addCandidate(candidate);
+            }
+            else {
+                log.debug("{}: <{}> rejects {}: <{}>", o(type, pattern, //
+                        candidate.stepType, candidate.stepPattern));
+            }
+        }
+        
+        public ConcurrentLinkedQueue<PotentialStep> getCandidates() {
+            return candidates;
         }
 
+        private void addCandidate(PotentialStep potentialStep) {
+            candidates.add(potentialStep);
+        }
+
+        private JBKeyword partType() {
+            return storyPart.getPreferredKeyword();
+        }
+
+        private String extractStepSentenceAndRemoveTrailingNewlines;
         public String extractStepSentenceAndRemoveTrailingNewlines() {
+            return extractStepSentenceAndRemoveTrailingNewlines;
+        }
+        
+        private void computeExtractStepSentenceAndRemoveTrailingNewlines() {
             String stepSentence = storyPart.extractStepSentence();
             // remove any comment that can still be within the step
             String cleaned = Constants.removeComment(stepSentence);
-            return Strings.removeTrailingNewlines(cleaned);
+            extractStepSentenceAndRemoveTrailingNewlines = Strings.removeTrailingNewlines(cleaned);
         }
 
-        public synchronized MarkData addErrorMark(Marks.Code code, String message) {
+        public MarkData addErrorMark(Marks.Code code, String message) {
             return addMark(code, message, IMarker.SEVERITY_ERROR);
         }
         
-        public synchronized MarkData addInfoMark(Marks.Code code, String message) {
+        public MarkData addInfoMark(Marks.Code code, String message) {
             return addMark(code, message, IMarker.SEVERITY_INFO);
         }
         
-        public synchronized MarkData addMark(Marks.Code code, String message, int severity) {
+        public MarkData addMark(Marks.Code code, String message, int severity) {
             MarkData markData = new MarkData()//
                     .severity(severity)//
                     .message(message)//

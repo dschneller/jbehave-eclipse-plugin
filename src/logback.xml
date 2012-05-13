@@ -1,13 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+	
 	<appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-		<layout class="ch.qos.logback.classic.PatternLayout">
-			<Pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n
-			</Pattern>
-		</layout>
+		<encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
+			<Pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</Pattern>
+	  	</encoder>
 	</appender>
 
-	<logger name="org.technbolts" level="debug" />
+	<logger name="org.technbolts" level="warn" />
+	<logger name="org.technbolts.eclipse.jdt.methodcache" level="debug" />
+	<logger name="org.technbolts.jbehave.eclipse.JBehaveProject" level="debug" />
+	<logger name="org.technbolts.jbehave.eclipse.editors.story.scanner" level="info" />
+
 	<root level="error">
 		<appender-ref ref="STDOUT" />
 	</root>
